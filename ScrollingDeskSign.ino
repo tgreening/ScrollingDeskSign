@@ -6,11 +6,18 @@
 #include <Ticker.h>  //Ticker Library
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 #include "Settings.h"
+#include "AccuWeatherLibrary.h"
 
 #define PIN D4
 #define HOSTNAME "ScrollingDeskSign"
 
+AccuweatherDailyData dataD[1];
+AccuweatherHourlyData dataH;
+AccuweatherCurrentData dataC;
+AccuweatherLocationData dataL;
+Accuweather aw(AccuWeatherApiKey, CityID, "en-us", IS_METRIC);
 
 //tickers
 Ticker updateDataTicker;
@@ -27,14 +34,6 @@ String message = "hello";
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
 
-// Time
-/*TimeDB TimeDB("");
-  String lastMinute = "xx";
-  int displayRefreshCount = 1;
-  long lastEpoch = 0;
-  long firstEpoch = 0;
-  long displayOffEpoch = 0;M
-*/
 
 // MATRIX DECLARATION:
 // Parameter 1 = width of NeoPixel matrix
@@ -76,15 +75,52 @@ void setup() {
   matrix.setBrightness(20);
   clearScreen();
   centerPrint("Boot");
-  WiFi.begin(wifi_ssid, wifi_password);   // access Wi-FI point
-
+  WiFiManager wifiManager;
+  wifiManager.setConfigPortalTimeout(90);
+  if (!wifiManager.startConfigPortal(HOSTNAME)) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+    if (!wifiManager.autoConnect(HOSTNAME)) {
+      ESP.reset();
+      delay(5000);
+    }
+  }
   while ( WiFi.status() != WL_CONNECTED ) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("connected\r\n");
+  Serial.println("connected...yeey :)");
+  if (!MDNS.begin(HOSTNAME)) {
+    Serial.println("Error setting up MDNS responder!");
+  }
+  WiFi.mode(WIFI_STA);
 
+  ArduinoOTA.setHostname(HOSTNAME);
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH)
+      type = "sketch";
+    else // U_SPIFFS
+      type = "filesystem";
 
+    // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+    Serial.println("Start updating " + type);
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("\nEnd");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+  });
+  ArduinoOTA.begin();
   // print the received signal strength:
   Serial.print("Signal Strength (RSSI): ");
   Serial.print(getWifiQuality());
@@ -95,6 +131,10 @@ void setup() {
   isUpdateData = true;
   timeClient.begin();
   clearScreen();
+  int ret = aw.getLocation(&dataL);
+  Serial.println(ret);
+  while (aw.continueDownload() > 0) {
+  }
 }
 
 void loop() {
@@ -116,43 +156,41 @@ void loop() {
     centerPrint(hourMinutes(false));
     isShowTime = false;
   }
+  ArduinoOTA.handle();
 }
 
 void showWeather() {
   clearScreen();
-  String temperature = weatherClient.getTempRounded(0);
-  String description = weatherClient.getDescription(0);
+  String temperature = roundFloat(dataC.Temperature);
+  String description = dataC.WeatherText;
   description.toUpperCase();
   String msg;
   msg += " ";
 
-  if (SHOW_DATE) {
-    /*   msg += TimeDB.getDayName() + ", ";
-       msg += TimeDB.getMonthName() + " " + day() + "  ";*/
-  }
+
   if (SHOW_CITY) {
-    msg += weatherClient.getCity(0) + "  ";
+    msg += dataL.Name + "  ";
   }
   msg += temperature + getTempSymbol() + "  ";
 
-  //show high/low temperature
-  if (SHOW_HIGHLOW) {
-    msg += "Hi/Lo:" + weatherClient.getHigh(0).substring(0, 2) + "/" + weatherClient.getLow(0).substring(0, 2) + " " + getTempSymbol() + "  ";
-  }
 
   if (SHOW_CONDITION) {
     msg += description + "  ";
   }
   if (SHOW_HUMIDITY) {
-    msg += "Humid:" + weatherClient.getHumidityRounded(0) + "%  ";
+    msg += "Humid:" + roundFloat(dataC.RelativeHumidity) + "%  ";
   }
   if (SHOW_WIND) {
-    msg += "Wind: " + weatherClient.getDirectionText(0) + " @ " + weatherClient.getWindRounded(0) + " " + getSpeedSymbol() + "  ";
+    msg += "Wind: " + String(dataC.WindDirection) + " @ " + roundFloat(dataC.WindSpeed) + " " + getSpeedSymbol() + "  ";
+  }
+  //show high/low temperature
+  if (SHOW_HIGHLOW) {
+    msg += "Hi/Lo:" + roundFloat(dataD[0].TempMax) + "/" + roundFloat(dataD[0].TempMin) + getTempSymbol() + "  ";
   }
   //line to show barometric pressure
-  if (SHOW_PRESSURE) {
+  /*if (SHOW_PRESSURE) {
     msg += "Press:" + weatherClient.getPressure(0) + getPressureSymbol() + "  ";
-  }
+    }*/
   scrollMessage(msg);
 }
 
@@ -180,10 +218,33 @@ void getData() //client function to send/receive GET request data.
   matrix.drawPixel(0, 6, HIGH);
   matrix.drawPixel(0, 5, HIGH);
   matrix.show();
-  weatherClient.updateWeather();
-  if (weatherClient.getError() != "") {
-    scrollMessage(weatherClient.getError());
+  int ret = aw.getCurrent(&dataC);
+
+  /*  if (ret != 0) {
+      Serial.println("ERROR");
+      Serial.println(ret);
+      return;
+    }
+  */
+  while (aw.continueDownload() > 0) {
   }
+  Serial.println("Got Current Weather....");
+  ret = aw.getDaily(dataD, 1);
+
+  /*if (ret != 0) {
+    Serial.println("ERROR");
+    Serial.println(ret);
+    return;
+    }*/
+
+  while (aw.continueDownload() > 0) {
+  }
+  Serial.println("Got Daily Weather....");
+
+  /* weatherClient.updateWeather();
+    if (weatherClient.getError() != "") {
+     scrollMessage(weatherClient.getError());
+    }*/
 
   Serial.println("Updating Time...");
   //Update the Time
@@ -192,8 +253,9 @@ void getData() //client function to send/receive GET request data.
   matrix.drawPixel(0, 3, HIGH);
   matrix.drawPixel(0, 2, HIGH);
   matrix.show();
-  timeClient.setTimeOffset(weatherClient.getTimeZone(0) * 3600);
+  timeClient.setTimeOffset(dataL.GmtOffset * 3600);
   timeClient.update();
+
   /* TimeDB.updateConfig(TIMEDBKEY, weatherClient.getLat(0), weatherClient.getLon(0));
     TimeDB.updateTime();
     Serial.println();*/
@@ -293,4 +355,9 @@ String zeroPad(int number) {
   } else {
     return String(number);
   }
+}
+
+String roundFloat(float incoming) {
+  int temp = static_cast<int>(incoming + 0.5f);
+  return String(temp);
 }
