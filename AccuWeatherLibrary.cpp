@@ -417,7 +417,7 @@ void AccuweatherHourlyParser::value(String value) {
   popAllKeys();
 }
 
-AccuweatherDailyParser::AccuweatherDailyParser(AccuweatherDailyData * data_ptr_, int maxListLength_) : AccuweatherParser(maxListLength_) {
+AccuweatherDailyParser::AccuweatherDailyParser(AccuweatherDailyData * data_ptr_) : AccuweatherParser(1) {
   data_ptr = data_ptr_;
 }
 
@@ -429,9 +429,6 @@ void AccuweatherDailyParser::startObject() {
 }
 
 void AccuweatherDailyParser::value(String value) {
-  if (baseListIdx >= maxListLength) {
-    return;
-  }
 
   if (STACK_HAS_SUFFIX(Date_suffix)) {
     data_ptr[baseListIdx].Date = value;
@@ -440,6 +437,8 @@ void AccuweatherDailyParser::value(String value) {
     data_ptr[baseListIdx].TempMin = value.toFloat();
   }
   else if (STACK_HAS_SUFFIX(TempMax_suffix)) {
+    Serial.print("Minimum Temperature: ");
+    Serial.println(value);
     data_ptr[baseListIdx].TempMax = value.toFloat();
   }
   else if (STACK_HAS_SUFFIX(RealFeelTempMin_suffix)) {
@@ -676,21 +675,12 @@ int Accuweather::getHourly(AccuweatherHourlyData * data_ptr, int hours) {
   return httpCode;
 }
 
-static const char dailyURLTemplate[] PROGMEM = "http://dataservice.accuweather.com/forecasts/v1/daily/%dday/%d?apikey=%s&details=true&metric=%s&language=%s";
-int Accuweather::getDaily(AccuweatherDailyData * data_ptr, int days) {
-  static const int possibleDays[] = {15, 10, 5, 1};
-  int daysToGet = possibleDays[0];
-  for (int i = 0; i < SIZE_OF_CONST_TABLE(possibleDays); i++) {
-    if (days <= possibleDays[i]) {
-      daysToGet = possibleDays[i];
-    }
-    else {
-      break;
-    }
-  }
+static const char dailyURLTemplate[] PROGMEM = "http://dataservice.accuweather.com/forecasts/v1/daily/1day/%d?apikey=%s&details=true&metric=%s&language=%s";
+int Accuweather::getToday(AccuweatherDailyData* data_ptr) {
+
 
   char url[256];
-  snprintf_P(url, 256, dailyURLTemplate, daysToGet, locationID, apiKey, (isMetric ? "true" : "false"), languageID);
+  snprintf_P(url, 256, dailyURLTemplate, locationID, apiKey, (isMetric ? "true" : "false"), languageID);
   http.begin(url);
 
   int httpCode = http.GET();
@@ -698,7 +688,7 @@ int Accuweather::getDaily(AccuweatherDailyData * data_ptr, int days) {
     if (httpCode == HTTP_CODE_OK) {
       length = http.getSize();
       parser.reset();
-      listener = new AccuweatherDailyParser(data_ptr, days);
+      listener = new AccuweatherDailyParser(data_ptr);
       parser.setListener(listener);
       return 0;
     }

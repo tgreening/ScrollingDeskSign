@@ -2,38 +2,44 @@
 #include <Adafruit_NeoMatrix.h>
 #include <Adafruit_NeoPixel.h>
 #include <WiFiManager.h> // --> https://github.com/tzapu/WiFiManager
-#include <ESP8266mDNS.h>
+//#include <ESP8266mDNS.h>
 #include <Ticker.h>  //Ticker Library
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include "Settings.h"
 #include "AccuWeatherLibrary.h"
+#include "SlackWebhook.h"
 
-#define PIN D4
-#define HOSTNAME "ScrollingDeskSign"
-
-AccuweatherDailyData dataD[1];
+AccuweatherDailyData dataD;
 AccuweatherHourlyData dataH;
 AccuweatherCurrentData dataC;
 AccuweatherLocationData dataL;
 Accuweather aw(AccuWeatherApiKey, CityID, "en-us", IS_METRIC);
 
 //tickers
-Ticker updateDataTicker;
+Ticker updateCurrentWeatherTicker;
 Ticker showWeatherTicker;
 Ticker showTimeTicker;
-bool isUpdateData = false;
+bool isUpdateCurrentWeatherData = true;
+
+bool isUpdateDailyWeatherData = true;
 bool isShowWeather = false;
 bool isShowTime = true;
+bool isUpdateTime = false;
 
 // LED Settings
 const int offset = 1;
-int refresh = 0;
+int refresh, updateDailyWeatherCounter, updateTimeCounter = 0;
 String message = "hello";
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
 
+const String slack_hook_url = "/services/xxxxxxx";
+const String slack_username = "Scrolling Sign";
+const char* host = "hooks.slack.com";
+const char* fingerprint = "C10D5349D23EE52BA261D59E6F990D3DFD8BB2B3";
+SlackWebhook webhook(host, slack_hook_url, fingerprint);
 
 // MATRIX DECLARATION:
 // Parameter 1 = width of NeoPixel matrix
@@ -125,40 +131,74 @@ void setup() {
   Serial.print("Signal Strength (RSSI): ");
   Serial.print(getWifiQuality());
   Serial.println("%");
-  updateDataTicker.attach(updateDataInterval, shouldUpdateData);
+  updateCurrentWeatherTicker.attach(updateCurrentWeatherInterval, shouldUpdateCurrentWeather);
   showWeatherTicker.attach(showWeatherInterval, shouldShowWeather);
   showTimeTicker.attach(updateTimeInterval, shouldShowTime);
-  isUpdateData = true;
   timeClient.begin();
   clearScreen();
-  int ret = aw.getLocation(&dataL);
-  Serial.println(ret);
-  while (aw.continueDownload() > 0) {
+  int maxRetries = 0;
+  while (dataL.GmtOffset == 0 && maxRetries++ < 3) {
+    updateTime();
   }
+
 }
 
 void loop() {
-  if (isUpdateData) {
-    clearScreen();
+  if (isUpdateCurrentWeatherData || isUpdateDailyWeatherData) {
     centerPrint("Update");
+    char output[100];
+    sprintf(output, "Today Hi: %f, Lo: %fF", dataD.TempMax, dataD.TempMin);
+    Serial.println(output);
     getData();
-    isUpdateData = false;
     isShowTime = true;
     clearScreen();
   }
   if (isShowWeather) {
+    Serial.println("Showing weather...");
+
     showWeather();
     isShowWeather = false;
     isShowTime = true;
     clearScreen();
   }
   if (isShowTime) {
+    Serial.println("Showing time...");
     centerPrint(hourMinutes(false));
     isShowTime = false;
+  }
+  if (isUpdateTime) {
+    updateTime();
   }
   ArduinoOTA.handle();
 }
 
+void updateTime() {
+  Serial.println("Updating time...");
+  isUpdateTime = false;
+  AccuweatherLocationData localLocation;
+  int ret = aw.getLocation(&localLocation);
+  Serial.println(ret);
+  while (aw.continueDownload() > 0) {
+  }
+  Serial.println(localLocation.GmtOffset);
+  if ((localLocation.GmtOffset != 0  && localLocation.GmtOffset != NULL) && dataL.GmtOffset == 0) { //got something and didn't have anything before
+    dataL = localLocation;
+  } else if (abs(dataL.GmtOffset - localLocation.GmtOffset) <= 1 && dataL.GmtOffset != 0) { //had a something and daylight savings - only one hour change
+    dataL = localLocation;
+  } else if (dataL.GmtOffset == 0) { // didn't get anything and didn't have anything so default 
+    Serial.println("Error getting location..");
+    postToSlack("Location Error");
+    dataL.GmtOffset = -4;
+  }
+  /*char gmt[25];
+  Serial.println("Preparing message...");
+  sprintf(gmt, "GMToffset set to: %i", dataL.GmtOffset);
+  Serial.println("About to send message...");
+  postToSlack(gmt);*/
+  timeClient.setTimeOffset(dataL.GmtOffset * 3600);
+  timeClient.update();
+
+}
 void showWeather() {
   clearScreen();
   String temperature = roundFloat(dataC.Temperature);
@@ -185,7 +225,7 @@ void showWeather() {
   }
   //show high/low temperature
   if (SHOW_HIGHLOW) {
-    msg += "Hi/Lo:" + roundFloat(dataD[0].TempMax) + "/" + roundFloat(dataD[0].TempMin) + getTempSymbol() + "  ";
+    msg += "Hi/Lo:" + roundFloat(dataD.TempMax) + "/" + roundFloat(dataD.TempMin) + getTempSymbol() + "  ";
   }
   //line to show barometric pressure
   /*if (SHOW_PRESSURE) {
@@ -218,43 +258,60 @@ void getData() //client function to send/receive GET request data.
   matrix.drawPixel(0, 6, HIGH);
   matrix.drawPixel(0, 5, HIGH);
   matrix.show();
-  int ret = aw.getCurrent(&dataC);
-
-  /*  if (ret != 0) {
-      Serial.println("ERROR");
-      Serial.println(ret);
-      return;
+  Serial.println("Updating Data...");
+  if (isUpdateCurrentWeatherData) {
+    AccuweatherCurrentData localCurrentData;
+    Serial.println("Updating Current Weather...");
+    int ret = aw.getCurrent(&localCurrentData);
+    while (aw.continueDownload() > 0) {
     }
-  */
-  while (aw.continueDownload() > 0) {
+    if (localCurrentData.Temperature != 0) {
+      dataC = localCurrentData;
+      Serial.println("Got Current Weather....");
+    } else {
+      Serial.println("Current Weather Error");
+      postToSlack("Current Weather Error");
+    }
+
+    isUpdateCurrentWeatherData = false;
+    updateDailyWeatherCounter++;
+    if (updateDailyWeatherCounter * updateCurrentWeatherInterval >= updateDailyWeatherInterval) {
+      isUpdateDailyWeatherData = true;
+      updateDailyWeatherCounter = 0;
+    }
+    updateTimeCounter++;
+    if (updateTimeCounter * updateCurrentWeatherInterval >= updateTimeZoneInterval) {
+      isUpdateTime = true;
+      updateTimeCounter = 0;
+    }
+
   }
-  Serial.println("Got Current Weather....");
-  ret = aw.getDaily(dataD, 1);
+  if (isUpdateDailyWeatherData) {
+    Serial.println("Updating Daily Weather...");
+    AccuweatherDailyData localDailyWeather;
+    int ret = aw.getToday(&localDailyWeather);
 
-  /*if (ret != 0) {
-    Serial.println("ERROR");
-    Serial.println(ret);
-    return;
-    }*/
-
-  while (aw.continueDownload() > 0) {
+    while (aw.continueDownload() > 0) {
+    }
+    char output[100];
+    isUpdateDailyWeatherData = false;
+    if (localDailyWeather.TempMax == 0) {
+      Serial.println("Error Getting Daily Weather....");
+      postToSlack("Daily Weather Error");
+      return;
+    } else {
+      dataD = localDailyWeather;
+    }
+    Serial.println("Got Daily Weather....");
+    sprintf(output, "Today Hi: %f, Lo: %fF", dataD.TempMax, dataD.TempMin);
+    Serial.println(output);
+   // postToSlack(output);
   }
-  Serial.println("Got Daily Weather....");
-
-  /* weatherClient.updateWeather();
-    if (weatherClient.getError() != "") {
-     scrollMessage(weatherClient.getError());
-    }*/
-
-  Serial.println("Updating Time...");
-  //Update the Time
   matrix.fillScreen(0);
   matrix.drawPixel(0, 4, HIGH);
   matrix.drawPixel(0, 3, HIGH);
   matrix.drawPixel(0, 2, HIGH);
   matrix.show();
-  timeClient.setTimeOffset(dataL.GmtOffset * 3600);
-  timeClient.update();
 
   /* TimeDB.updateConfig(TIMEDBKEY, weatherClient.getLat(0), weatherClient.getLon(0));
     TimeDB.updateTime();
@@ -337,8 +394,8 @@ String getPressureSymbol()
   return rtnValue;
 }
 
-void shouldUpdateData() {
-  isUpdateData = true;
+void shouldUpdateCurrentWeather() {
+  isUpdateCurrentWeatherData = true;
 }
 
 void shouldShowWeather() {
@@ -359,5 +416,13 @@ String zeroPad(int number) {
 
 String roundFloat(float incoming) {
   int temp = static_cast<int>(incoming + 0.5f);
-  return String(temp);
+  String tempString = String(temp);
+  tempString.replace(" ", "");
+  return tempString;
+}
+
+void postToSlack(char* message) {
+  char temp[150];
+  sprintf(temp, "{\"username\": \"Scrolling Sign\", \"text\": \"%s\"}", message);
+  webhook.postMessageToSlack(String(temp));
 }

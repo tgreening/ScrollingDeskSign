@@ -230,7 +230,7 @@ class AccuweatherHourlyParser: public AccuweatherParser {
 
 class AccuweatherDailyParser: public AccuweatherParser {
   public:
-    AccuweatherDailyParser(AccuweatherDailyData* data_ptr_, int maxListLength_);
+    AccuweatherDailyParser(AccuweatherDailyData* data_ptr_);
     virtual void startObject();
     virtual void value(String value);
   protected:
@@ -267,7 +267,7 @@ class Accuweather {
 
     int getCurrent(AccuweatherCurrentData* data_ptr);
     int getHourly(AccuweatherHourlyData* data_ptr, int hours);
-    int getDaily(AccuweatherDailyData* data_ptr, int days);
+    int getToday(AccuweatherDailyData* data_ptr);
     int getLocation(AccuweatherLocationData* data_ptr);
     int continueDownload();
     void freeConnection();

@@ -41,20 +41,26 @@
 
 
 
+
+#define PIN D4
+#define HOSTNAME "ScrollingDeskSign"
+
 //******************************
 // Start Settings
 //******************************
 
 const char* AccuWeatherApiKey = "xxxxxx";
 // Default City Location (use http://openweathermap.org/find to find city ID)
-int CityID = xxxx; //Only USE ONE for weather marquee
+int CityID = xxxxx; //Only USE ONE for weather marquee
 String marqueeMessage = "Hello";
 bool IS_METRIC = false; // false = Imperial and true = Metric
 boolean IS_24HOUR = false; // 23:00 millitary 24 hour clock
 boolean IS_PM = true; // Show PM indicator on Clock when in AM/PM mode
 
-int showWeatherInterval = 300; //show weather every two minutes
-int updateDataInterval = 3600;  //update data every 30 minutes
+int showWeatherInterval = 300; //show weather every five minutes
+int updateCurrentWeatherInterval = 3600;  //update data every 60 minutes
+int updateDailyWeatherInterval = 10800;  //update data every 120 minutes
+int updateTimeZoneInterval = 10800;
 int updateTimeInterval = 30;
 String timeDisplayTurnsOn = "06:30";  // 24 Hour Format HH:MM -- Leave blank for always on. (ie 05:30)
 String timeDisplayTurnsOff = "23:00"; // 24 Hour Format HH:MM -- Leave blank for always on. Both must be set to work.
