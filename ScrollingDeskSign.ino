@@ -35,10 +35,6 @@ String message = "hello";
 int spacer = 1;  // dots between letters
 int width = 5 + spacer; // The font width is 5 pixels + spacer
 
-const String slack_hook_url = "/services/xxxxxxx";
-const String slack_username = "Scrolling Sign";
-const char* host = "hooks.slack.com";
-const char* fingerprint = "C10D5349D23EE52BA261D59E6F990D3DFD8BB2B3";
 SlackWebhook webhook(host, slack_hook_url, fingerprint);
 
 // MATRIX DECLARATION:

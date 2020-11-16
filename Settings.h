@@ -65,6 +65,12 @@ int updateTimeInterval = 30;
 String timeDisplayTurnsOn = "06:30";  // 24 Hour Format HH:MM -- Leave blank for always on. (ie 05:30)
 String timeDisplayTurnsOff = "23:00"; // 24 Hour Format HH:MM -- Leave blank for always on. Both must be set to work.
 
+//Slack Settings
+const String slack_hook_url = "/services/xxxxx/xxxxx/xxxxx";
+const String slack_username = "Scrolling Sign";
+const char* host = "hooks.slack.com";
+const char* fingerprint = "C10D5349D23EE52BA261D59E6F990D3DFD8BB2B3";
+
 
 // (some) Default Weather Settings
 boolean SHOW_DATE = false;
